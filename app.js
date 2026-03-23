@@ -15,6 +15,7 @@ let currentIndex = 0;
 let activeLayer = 'a';
 let imageTimer = null;
 let isPlaying = false;
+let wakeLock = null;
 
 // --- DOM refs (resolved after DOMContentLoaded) ---
 let startScreen;
@@ -165,10 +166,30 @@ function showVideo(filename, inactiveId, inactiveEl) {
   video.load();
 }
 
+// --- Wake Lock (prevent screen sleep) ---
+
+async function acquireWakeLock() {
+  if ('wakeLock' in navigator) {
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+    } catch {
+      // Wake lock denied — OS may still sleep, but playback continues
+    }
+  }
+}
+
+async function releaseWakeLock() {
+  if (wakeLock) {
+    try { await wakeLock.release(); } catch { /* already released */ }
+    wakeLock = null;
+  }
+}
+
 // --- Start / Stop ---
 
 function stopPlayback() {
   isPlaying = false;
+  releaseWakeLock();
   clearTimeout(imageTimer);
   imageTimer = null;
 
@@ -227,6 +248,7 @@ async function startPlayback() {
   document.body.classList.add('playing');
   isPlaying = true;
 
+  await acquireWakeLock();
   showNext();
 }
 
@@ -248,4 +270,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   startBtn.addEventListener('click', startPlayback);
   document.addEventListener('fullscreenchange', onFullscreenChange);
+
+  // Re-acquire wake lock when tab becomes visible again
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && isPlaying) {
+      acquireWakeLock();
+    }
+  });
 });
