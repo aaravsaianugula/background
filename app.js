@@ -3,8 +3,7 @@
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp']);
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm']);
 
-const IMAGE_DURATION_MIN = 3_600_000;  // 1 hour in ms
-const IMAGE_DURATION_MAX = 10_800_000; // 3 hours in ms
+const IMAGE_DURATION = 1_200_000; // 20 minutes in ms
 
 const CROSSFADE_DURATION = 1_500; // matches CSS transition (1.5s)
 const CROSSFADE_CLEANUP_DELAY = CROSSFADE_DURATION + 100; // slight buffer past transition
@@ -28,10 +27,6 @@ let layerB;
 function getExtension(filename) {
   const parts = filename.split('.');
   return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
-}
-
-function randomBetween(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 function fisherYatesShuffle(array) {
@@ -123,8 +118,7 @@ function showImage(filename, inactiveId, inactiveEl) {
     if (!isPlaying) return;
     swapLayers(inactiveId);
     advanceIndex();
-    const duration = randomBetween(IMAGE_DURATION_MIN, IMAGE_DURATION_MAX);
-    imageTimer = setTimeout(showNext, duration);
+    imageTimer = setTimeout(showNext, IMAGE_DURATION);
   };
 
   img.onerror = () => {
