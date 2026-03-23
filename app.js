@@ -1,6 +1,6 @@
 /* Art Display — playback engine */
 
-const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp']);
+const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif']);
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm']);
 
 const IMAGE_DURATION = 1_200_000; // 20 minutes in ms
