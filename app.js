@@ -115,17 +115,31 @@ function showImage(filename, inactiveId, inactiveEl) {
   const img = document.createElement('img');
   img.alt = '';
 
+  let settled = false;
+
+  // If the image stalls (no onload/onerror), skip after 15s
+  const loadTimeout = setTimeout(() => {
+    if (settled || !isPlaying) return;
+    settled = true;
+    advanceIndex();
+    showNext();
+  }, 15_000);
+
   img.onload = () => {
-    if (!isPlaying) return;
+    if (settled || !isPlaying) return;
+    settled = true;
+    clearTimeout(loadTimeout);
     swapLayers(inactiveId);
     advanceIndex();
     imageTimer = setTimeout(showNext, IMAGE_DURATION);
   };
 
   img.onerror = () => {
-    if (!isPlaying) return;
+    if (settled || !isPlaying) return;
+    settled = true;
+    clearTimeout(loadTimeout);
     advanceIndex();
-    showNext();
+    setTimeout(showNext, 0);
   };
 
   img.src = 'media/' + encodeURIComponent(filename);
@@ -256,7 +270,11 @@ async function startPlayback() {
 
 function onFullscreenChange() {
   if (!document.fullscreenElement && isPlaying) {
-    stopPlayback();
+    // ChromeOS can exit fullscreen involuntarily (notifications, sleep/wake).
+    // Try to re-enter; only stop if the user deliberately exits.
+    document.documentElement.requestFullscreen().catch(() => {
+      // Fullscreen truly denied — keep playing anyway, don't stop
+    });
   }
 }
 
