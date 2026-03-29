@@ -7,6 +7,7 @@ const IMAGE_DURATION = 1_200_000; // 20 minutes in ms
 
 const CROSSFADE_DURATION = 1_500; // matches CSS transition (1.5s)
 const CROSSFADE_CLEANUP_DELAY = CROSSFADE_DURATION + 100; // slight buffer past transition
+const POLL_INTERVAL = 300_000; // 5 min — check for media list updates
 
 // --- State ---
 let mediaList = [];
@@ -16,6 +17,7 @@ let activeLayer = 'a';
 let imageTimer = null;
 let isPlaying = false;
 let wakeLock = null;
+let pollTimer = null;
 
 // --- DOM refs (resolved after DOMContentLoaded) ---
 let startScreen;
@@ -78,10 +80,15 @@ function swapLayers(inactiveId) {
 function advanceIndex() {
   currentIndex += 1;
   if (currentIndex >= shuffled.length) {
-    const lastPlayed = shuffled[shuffled.length - 1];
+    if (mediaList.length === 0) {
+      shuffled = [];
+      currentIndex = 0;
+      return;
+    }
+    const lastPlayed = shuffled.length > 0 ? shuffled[shuffled.length - 1] : null;
     shuffled = fisherYatesShuffle(mediaList);
     // Prevent back-to-back repeat across cycles (if more than 1 item)
-    if (shuffled.length > 1 && shuffled[0] === lastPlayed) {
+    if (shuffled.length > 1 && lastPlayed && shuffled[0] === lastPlayed) {
       const swapIdx = 1 + Math.floor(Math.random() * (shuffled.length - 1));
       shuffled[0] = shuffled[swapIdx];
       shuffled[swapIdx] = lastPlayed;
@@ -92,6 +99,12 @@ function advanceIndex() {
 
 function showNext() {
   if (!isPlaying) return;
+
+  // Guard: no media available (all removed or empty after poll update)
+  if (shuffled.length === 0 || currentIndex >= shuffled.length) {
+    imageTimer = setTimeout(showNext, POLL_INTERVAL);
+    return;
+  }
 
   const filename = shuffled[currentIndex];
   const ext = getExtension(filename);
@@ -199,13 +212,71 @@ async function releaseWakeLock() {
   }
 }
 
+// --- Live polling for media changes ---
+
+const FILENAME_PATTERN = /^[^/\\:.*?#][^/\\:*?#]*$/;
+
+function validateMediaList(data) {
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter(item => typeof item === 'string' && item.trim().length > 0)
+    .map(item => item.trim())
+    .filter(item => FILENAME_PATTERN.test(item));
+}
+
+function applyMediaChanges(freshList) {
+  const currentSet = new Set(mediaList);
+  const freshSet = new Set(freshList);
+
+  const removed = mediaList.filter(f => !freshSet.has(f));
+  const hasAdded = freshList.some(f => !currentSet.has(f));
+
+  if (!hasAdded && removed.length === 0) return;
+
+  const wasEmpty = mediaList.length === 0 || shuffled.length === 0;
+  mediaList = freshList;
+
+  if (removed.length > 0) {
+    const removedSet = new Set(removed);
+    const played = shuffled.slice(0, currentIndex);
+    const remaining = shuffled.slice(currentIndex).filter(f => !removedSet.has(f));
+    shuffled = played.concat(remaining);
+
+    // Clamp currentIndex if removals pushed it out of bounds
+    if (currentIndex >= shuffled.length) {
+      currentIndex = 0;
+    }
+  }
+
+  // If the player was stuck (empty list) and we now have files, rebuild shuffled
+  if (wasEmpty && mediaList.length > 0) {
+    shuffled = fisherYatesShuffle(mediaList);
+    currentIndex = 0;
+  }
+}
+
+async function pollForChanges() {
+  try {
+    const response = await fetch('media.json', { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json();
+    const freshList = validateMediaList(data);
+    if (freshList.length === 0) return; // don't clear a working slideshow
+    applyMediaChanges(freshList);
+  } catch {
+    // Network error — silently retry next interval
+  }
+}
+
 // --- Start / Stop ---
 
 function stopPlayback() {
   isPlaying = false;
   releaseWakeLock();
   clearTimeout(imageTimer);
+  clearInterval(pollTimer);
   imageTimer = null;
+  pollTimer = null;
 
   layerA.classList.remove('active');
   layerB.classList.remove('active');
@@ -228,23 +299,19 @@ async function startPlayback() {
     if (!response.ok) throw new Error('Fetch failed');
     data = await response.json();
   } catch {
-    alert('No media found. Add files to media/ and update media.json');
+    alert('No media found. Add image files to the media/ folder and redeploy.');
     return;
   }
 
   if (!Array.isArray(data) || data.length === 0) {
-    alert('No media found. Add files to media/ and update media.json');
+    alert('No media found. Add image files to the media/ folder and redeploy.');
     return;
   }
 
-  mediaList = data.filter(item =>
-    typeof item === 'string' &&
-    item.trim().length > 0 &&
-    /^[^/\\:.*?#][^/\\:*?#]*$/.test(item.trim())
-  );
+  mediaList = validateMediaList(data);
 
   if (mediaList.length === 0) {
-    alert('No valid media files found in media.json');
+    alert('No valid media files found. Check the media/ folder.');
     return;
   }
 
@@ -264,6 +331,7 @@ async function startPlayback() {
 
   await acquireWakeLock();
   showNext();
+  pollTimer = setInterval(pollForChanges, POLL_INTERVAL);
 }
 
 // --- Fullscreen change handler ---
