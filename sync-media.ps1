@@ -280,8 +280,14 @@ $trackedRaw = Invoke-Git @('ls-files', '--', 'media')
 $tracked = New-Object System.Collections.Generic.HashSet[string]
 foreach ($t in $trackedRaw) {
     if ([string]::IsNullOrWhiteSpace($t)) { continue }
-    # ls-files returns "media/foo.jpg" — strip the prefix to compare to disk names.
+    # ls-files returns "media/foo.jpg" - strip the prefix to compare to disk names.
     $rel = $t -replace '^media[\\/]', ''
+    # Filter meta files (e.g. media/.gitignore) from tracked the SAME WAY we
+    # filter them from $ValidMedia. Otherwise a tracked meta file appears in
+    # $tracked but not $onDisk, and the diff falsely classifies it as a
+    # deletion - which silently `git rm`s it. This bit me on first run;
+    # see commit 9dd9136 where media/.gitignore got nuked. Don't regress.
+    if ($IgnoredMetaNames -contains $rel) { continue }
     [void]$tracked.Add($rel)
 }
 
