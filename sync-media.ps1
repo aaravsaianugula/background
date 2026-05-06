@@ -59,7 +59,11 @@ param(
 # (git, node) — for those we check $LASTEXITCODE explicitly.
 $ErrorActionPreference = 'Stop'
 
-# --- Config (must mirror scripts/generate-media-json.js) -----------------
+# --- Config -------------------------------------------------------------
+# IMPORTANT: this allowlist is mirrored in 3 other files. Keep in sync:
+#   - scripts/generate-media-json.js  (VALID_EXTENSIONS, VALID_FILENAME, IGNORED_META_NAMES)
+#   - app.js                          (IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, FILENAME_PATTERN)
+#   - media/.gitignore                (one !*.<ext> per extension, both cases)
 
 $ValidExtensions = @(
     'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif',
@@ -302,24 +306,25 @@ foreach ($a in $adds)    { Write-Info "  + $a" }
 Write-Ok  ("Files to delete:    {0}" -f $deletes.Count)
 foreach ($d in $deletes) { Write-Info "  - $d" }
 
-if ($adds.Count -eq 0 -and $deletes.Count -eq 0) {
-    Write-Section 'Nothing to do'
-    # Still regenerate media.json in case it's drifted.
-    Write-Info 'Regenerating media.json anyway in case it drifted...'
-    Invoke-Native node @('scripts/generate-media-json.js') | ForEach-Object { Write-Info $_ }
-    $mediaJsonStatus = Invoke-Git @('status', '--porcelain', '--', 'media.json')
-    if ([string]::IsNullOrWhiteSpace($mediaJsonStatus)) {
-        Write-Ok 'media.json already in sync. Nothing to commit.'
-        exit 0
-    }
-    Write-Warn2 'media.json was out of sync; will commit just that.'
-}
-
 # --- Regenerate media.json -----------------------------------------------
+# Single regeneration site. Whether or not adds/deletes are non-empty, the
+# build script's output is the canonical media.json - run it once here, then
+# decide whether to commit. (Earlier versions regenerated twice in the
+# "nothing to do" branch; that's now consolidated.)
 
 Write-Section 'Regenerating media.json'
 $buildOutput = Invoke-Native node @('scripts/generate-media-json.js')
 foreach ($line in $buildOutput) { Write-Info $line }
+
+if ($adds.Count -eq 0 -and $deletes.Count -eq 0) {
+    $mediaJsonStatus = Invoke-Git @('status', '--porcelain', '--', 'media.json')
+    if ([string]::IsNullOrWhiteSpace($mediaJsonStatus)) {
+        Write-Section 'Nothing to do'
+        Write-Ok 'No file changes and media.json already in sync. Nothing to commit.'
+        exit 0
+    }
+    Write-Warn2 'No file changes, but media.json drifted. Will commit just that.'
+}
 
 # --- Stage --------------------------------------------------------------
 

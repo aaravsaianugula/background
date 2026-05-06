@@ -1,9 +1,17 @@
 /* Art Display — playback engine */
 
+// IMPORTANT: these allowlists are mirrored in 3 other files. Keep in sync:
+//   - scripts/generate-media-json.js  (VALID_EXTENSIONS)
+//   - sync-media.ps1                  ($ValidExtensions)
+//   - media/.gitignore                (one !*.<ext> per extension, both cases)
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif']);
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm']);
 
 const IMAGE_DURATION = 1_200_000; // 20 minutes in ms
+const IMAGE_LOAD_TIMEOUT = 15_000; // skip image if onload/onerror don't fire in 15s
+
+const VIDEO_LOAD_TIMEOUT = 15_000; // skip video if oncanplay doesn't fire in 15s
+const VIDEO_STALL_TIMEOUT = 10_000; // skip video if no timeupdate fires for 10s mid-play
 
 const CROSSFADE_DURATION = 1_500; // matches CSS transition (1.5s)
 const CROSSFADE_CLEANUP_DELAY = CROSSFADE_DURATION + 100; // slight buffer past transition
@@ -18,6 +26,11 @@ let imageTimer = null;
 let isPlaying = false;
 let wakeLock = null;
 let pollTimer = null;
+// Disposer for the currently in-flight video (null when no video is loading
+// or playing). stopPlayback() calls this to kill the video's loadTimeout
+// and stallTimer; without it, an orphaned timer from the prior session
+// could fire into a fresh session and clobber the active layer.
+let activeVideoDispose = null;
 
 // --- DOM refs (resolved after DOMContentLoaded) ---
 let startScreen;
@@ -130,13 +143,13 @@ function showImage(filename, inactiveId, inactiveEl) {
 
   let settled = false;
 
-  // If the image stalls (no onload/onerror), skip after 15s
+  // If the image stalls (no onload/onerror), skip after IMAGE_LOAD_TIMEOUT
   const loadTimeout = setTimeout(() => {
     if (settled || !isPlaying) return;
     settled = true;
     advanceIndex();
     showNext();
-  }, 15_000);
+  }, IMAGE_LOAD_TIMEOUT);
 
   img.onload = () => {
     if (settled || !isPlaying) return;
@@ -169,24 +182,90 @@ function showVideo(filename, inactiveId, inactiveEl) {
   video.style.maxHeight = '100%';
   video.style.objectFit = 'contain';
 
-  video.oncanplay = () => {
-    if (!isPlaying) return;
-    // Null out handler to guard against repeated canplay events
+  // Disposal flag prevents stale events from a replaced video element
+  // (still being garbage-collected) from advancing the slideshow.
+  let disposed = false;
+  let advanced = false;
+  let stallTimer = null;
+  let loadTimeout = null;
+
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    if (stallTimer) clearTimeout(stallTimer);
+    if (loadTimeout) clearTimeout(loadTimeout);
+    stallTimer = null;
+    loadTimeout = null;
     video.oncanplay = null;
+    video.ontimeupdate = null;
+    video.onended = null;
+    video.onerror = null;
+    // If we're still the registered active disposer, clear that pointer.
+    // Don't blindly null it — a later showVideo may have replaced us.
+    if (activeVideoDispose === dispose) {
+      activeVideoDispose = null;
+    }
+  }
+
+  function ensureAdvance() {
+    if (!advanced) {
+      advanceIndex();
+      advanced = true;
+    }
+  }
+
+  function skipToNext() {
+    if (disposed || !isPlaying) return;
+    ensureAdvance();
+    dispose();
+    showNext();
+  }
+
+  function armStall() {
+    if (stallTimer) clearTimeout(stallTimer);
+    // No timeupdate for STALL_TIMEOUT means playback is hung. The HTML5
+    // video element fires timeupdate several times per second while
+    // playing, so a 10s gap is unambiguously stalled.
+    stallTimer = setTimeout(skipToNext, VIDEO_STALL_TIMEOUT);
+  }
+
+  // 15s ceiling for initial canplay (matches showImage's loadTimeout).
+  loadTimeout = setTimeout(skipToNext, VIDEO_LOAD_TIMEOUT);
+
+  video.oncanplay = () => {
+    if (disposed || !isPlaying) return;
+    // Null handler so a second canplay (e.g. after seek) doesn't re-swap.
+    video.oncanplay = null;
+    clearTimeout(loadTimeout);
+    loadTimeout = null;
     swapLayers(inactiveId);
-    advanceIndex();
+    ensureAdvance();
+    armStall();
+  };
+
+  video.ontimeupdate = () => {
+    if (disposed || !isPlaying) return;
+    armStall();
   };
 
   video.onended = () => {
-    if (!isPlaying) return;
+    if (disposed || !isPlaying) return;
+    dispose();
     showNext();
   };
 
   video.onerror = () => {
-    if (!isPlaying) return;
-    advanceIndex();
+    if (disposed || !isPlaying) return;
+    ensureAdvance();
+    dispose();
     showNext();
   };
+
+  // Register dispose so stopPlayback can kill us if the player shuts down
+  // mid-load. Replaces any prior disposer (whose video has already been
+  // handed off — its dispose() at end-of-flow will no-op via activeVideoDispose
+  // === dispose check).
+  activeVideoDispose = dispose;
 
   video.src = 'media/' + encodeURIComponent(filename);
   inactiveEl.appendChild(video);
@@ -277,6 +356,13 @@ function stopPlayback() {
   clearInterval(pollTimer);
   imageTimer = null;
   pollTimer = null;
+
+  // Kill any in-flight video's loadTimeout / stallTimer / handlers so they
+  // can't fire into a future startPlayback() session and clobber the layer.
+  if (activeVideoDispose) {
+    activeVideoDispose();
+    activeVideoDispose = null;
+  }
 
   layerA.classList.remove('active');
   layerB.classList.remove('active');

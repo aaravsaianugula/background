@@ -9,6 +9,10 @@ const path = require('path');
 const MEDIA_DIR = path.join(__dirname, '..', 'media');
 const OUTPUT_FILE = path.join(__dirname, '..', 'media.json');
 
+// IMPORTANT: this allowlist is mirrored in 3 other files. Keep in sync:
+//   - sync-media.ps1               ($ValidExtensions, $ValidFilenamePattern, $IgnoredMetaNames)
+//   - app.js                       (IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, FILENAME_PATTERN)
+//   - media/.gitignore             (one !*.<ext> per extension, both cases)
 const VALID_EXTENSIONS = new Set([
   'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif',
   'mp4', 'webm',
