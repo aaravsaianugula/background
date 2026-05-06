@@ -1,1 +1,25 @@
+# Dependencies
 node_modules/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Tooling state
+.claude/
+.vscode/
+.idea/
+
+# Never commit installers / archives that wandered into the repo
+*.exe
+*.msi
+*.dmg
+*.pkg
+*.iso
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz

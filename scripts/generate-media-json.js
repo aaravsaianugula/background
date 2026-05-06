@@ -16,6 +16,10 @@ const VALID_EXTENSIONS = new Set([
 
 const VALID_FILENAME = /^[^/\\:.*?#][^/\\:*?#]*$/;
 
+// Repo-meta files that legitimately live in media/ but aren't slideshow content.
+// Silently skipped — not added to media.json, not reported as "skipped" noise.
+const IGNORED_META_NAMES = new Set(['.gitignore', '.gitkeep', '.gitattributes']);
+
 function getExtension(filename) {
   const dotIndex = filename.lastIndexOf('.');
   if (dotIndex < 1) return '';
@@ -25,7 +29,7 @@ function getExtension(filename) {
 function generate() {
   if (!fs.existsSync(MEDIA_DIR)) {
     console.warn('media/ directory not found — writing empty media.json');
-    fs.writeFileSync(OUTPUT_FILE, '[]\\n');
+    fs.writeFileSync(OUTPUT_FILE, '[]\n');
     return;
   }
 
@@ -34,6 +38,9 @@ function generate() {
   const skipped = [];
 
   for (const name of entries) {
+    // Silently ignore expected repo-meta files (e.g. media/.gitignore).
+    if (IGNORED_META_NAMES.has(name)) continue;
+
     const fullPath = path.join(MEDIA_DIR, name);
 
     let stat;

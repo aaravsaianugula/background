@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "node scripts/generate-media-json.js"
+    "build": "node scripts/generate-media-json.js",
+    "sync": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./sync-media.ps1",
+    "sync:dry": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./sync-media.ps1 -DryRun"
   }
 }
